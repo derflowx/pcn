@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#1d4ed8">
+<title>Pay PCN</title>
+<style>
+  :root { --bg:#f8fafc; --fg:#0f172a; --card:#fff; --muted:#64748b; --accent:#1d4ed8; --ok:#15803d; --border:#e2e8f0; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0b1120; --fg:#e2e8f0; --card:#111827; --muted:#94a3b8; --accent:#3b82f6; --ok:#22c55e; --border:#1f2937; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font:16px/1.4 system-ui,-apple-system,sans-serif; background:var(--bg); color:var(--fg); }
+  main { max-width:480px; margin:0 auto; padding:16px; }
+  h1 { font-size:22px; margin:8px 0 16px; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:16px; margin-bottom:12px; }
+  .step { font-size:13px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px; }
+  .big { width:100%; padding:18px; font-size:18px; font-weight:600; border:0; border-radius:12px; background:var(--accent); color:#fff; cursor:pointer; display:block; text-align:center; text-decoration:none; }
+  .big.ok { background:var(--ok); }
+  .big:disabled { opacity:.4; }
+  input[type=text] { width:100%; padding:14px; font-size:22px; font-family:ui-monospace,monospace; letter-spacing:.08em; border:1px solid var(--border); border-radius:10px; background:var(--bg); color:var(--fg); text-transform:uppercase; }
+  .row { display:flex; gap:8px; align-items:center; }
+  .row input { flex:1; }
+  .copy { padding:14px; border:1px solid var(--border); border-radius:10px; background:var(--card); color:var(--fg); font-size:15px; }
+  .muted { color:var(--muted); font-size:14px; }
+  .chips button { margin:4px 4px 0 0; padding:6px 10px; border-radius:999px; border:1px solid var(--border); background:var(--bg); color:var(--fg); font-family:ui-monospace,monospace; }
+  img#preview { max-width:100%; border-radius:10px; margin-top:10px; display:none; }
+  details summary { cursor:pointer; color:var(--muted); }
+  #file { display:none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>🅿️ Pay parking ticket</h1>
+
+  <div class="card">
+    <div class="step">1 · Photo of ticket</div>
+    <label class="big" for="file">📷 Take photo</label>
+    <input id="file" type="file" accept="image/*" capture="environment">
+    <p id="status" class="muted"></p>
+    <img id="preview" alt="">
+  </div>
+
+  <div class="card">
+    <div class="step">2 · Check details</div>
+    <div class="muted">PCN number</div>
+    <div class="row"><input id="pcn" type="text" autocomplete="off" placeholder="e.g. PY12345678"><button class="copy" data-copy="pcn">Copy</button></div>
+    <div class="chips" id="chips"></div>
+    <div class="muted" style="margin-top:10px">Registration</div>
+    <div class="row"><input id="vrm" type="text" autocomplete="off"><button class="copy" data-copy="vrm">Copy</button></div>
+  </div>
+
+  <div class="card">
+    <div class="step">3 · Pay</div>
+    <button id="go" class="big ok" disabled>Copy PCN &amp; open payment</button>
+    <p class="muted">The council site opens in a new tab. Tap “Pay or appeal”, paste the PCN (it's on your clipboard), then let your phone autofill the card / use Apple/Google Pay.</p>
+  </div>
+
+  <details class="card">
+    <summary>Settings</summary>
+    <p class="muted">Payment start page (if you find the direct “pay” link, paste it here to skip a click):</p>
+    <input id="url" type="text" style="font-size:14px;text-transform:none;letter-spacing:0">
+    <p class="muted">PCN format (regex):</p>
+    <input id="re" type="text" style="font-size:14px;text-transform:none;letter-spacing:0">
+  </details>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+<script>
+const DEFAULTS = { vrm: 'KP22VKJ', url: 'https://www.plymouth.gov.uk/pcn', re: '[A-Z]{2}[0-9]{8}' };
+const $ = id => document.getElementById(id);
+const store = {
+  get(k) { try { return localStorage.getItem('pcn.' + k) ?? DEFAULTS[k]; } catch { return DEFAULTS[k]; } },
+  set(k, v) { try { localStorage.setItem('pcn.' + k, v); } catch {} }
+};
+for (const k of ['vrm', 'url', 're']) {
+  $(k).value = store.get(k);
+  $(k).addEventListener('change', e => store.set(k, e.target.value.trim()));
+}
+
+const updateGo = () => { $('go').disabled = !$('pcn').value.trim(); };
+$('pcn').addEventListener('input', updateGo);
+
+async function copy(text) {
+  try { await navigator.clipboard.writeText(text); return true; }
+  catch { return false; }
+}
+document.querySelectorAll('[data-copy]').forEach(b => b.onclick = async () => {
+  const ok = await copy($(b.dataset.copy).value.trim().toUpperCase());
+  b.textContent = ok ? '✓' : '✗'; setTimeout(() => b.textContent = 'Copy', 1200);
+});
+
+// OCR often confuses letters/digits — fix the digit part of a candidate.
+const toDigit = s => s.replace(/[OQD]/g, '0').replace(/[IL|]/g, '1').replace(/Z/g, '2').replace(/S/g, '5').replace(/B/g, '8').replace(/G/g, '6');
+const toLetter = s => s.replace(/0/g, 'O').replace(/1/g, 'I').replace(/5/g, 'S').replace(/8/g, 'B');
+
+function findPcns(text) {
+  const re = new RegExp(store.get('re'), 'g');
+  const flat = text.toUpperCase().replace(/[^A-Z0-9\n ]/g, '');
+  const found = new Set();
+  // Direct matches, with spaces removed
+  for (const line of flat.split('\n')) {
+    const compact = line.replace(/\s+/g, '');
+    for (const m of compact.matchAll(re)) found.add(m[0]);
+    // Fuzzy: 2 chars + 8 chars, fix OCR confusions
+    for (const m of compact.matchAll(/(?=([A-Z0-9]{10}))/g)) {
+      const fixed = toLetter(m[1].slice(0, 2)) + toDigit(m[1].slice(2));
+      if (new RegExp('^' + store.get('re') + '$').test(fixed)) found.add(fixed);
+    }
+  }
+  // Prefer candidates near the words "PCN" / "Notice"
+  return [...found];
+}
+
+$('file').addEventListener('change', async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  $('preview').src = URL.createObjectURL(file);
+  $('preview').style.display = 'block';
+  $('status').textContent = 'Reading ticket…';
+  $('chips').innerHTML = '';
+  try {
+    const { data } = await Tesseract.recognize(file, 'eng', {
+      logger: m => { if (m.status === 'recognizing text') $('status').textContent = `Reading ticket… ${Math.round(m.progress * 100)}%`; }
+    });
+    const hits = findPcns(data.text);
+    if (hits.length) {
+      $('pcn').value = hits[0];
+      $('status').textContent = hits.length > 1 ? 'Found several — tap the right one:' : '✓ Found PCN — check it matches the ticket.';
+      if (hits.length > 1) hits.forEach(h => {
+        const b = document.createElement('button'); b.textContent = h;
+        b.onclick = () => { $('pcn').value = h; updateGo(); };
+        $('chips').appendChild(b);
+      });
+    } else {
+      $('status').textContent = 'Couldn’t find the PCN — type it in, or retake the photo closer and flatter.';
+    }
+  } catch (err) {
+    $('status').textContent = 'OCR failed (' + err.message + '). Type the PCN in.';
+  }
+  updateGo();
+});
+
+$('go').onclick = async () => {
+  const pcn = $('pcn').value.trim().toUpperCase();
+  await copy(pcn);
+  window.open(store.get('url'), '_blank');
+};
+</script>
+</body>
+</html>
